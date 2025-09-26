@@ -1,7 +1,9 @@
 name: fetch-open-data
 on:
   schedule: [{ cron: "*/30 * * * *" }]   # cada 30 min (UTC)
-  workflow_dispatch:                      # ejecutable a mano
+  workflow_dispatch:     
+permissions:
+  contents: write# ejecutable a mano
 jobs:
   fetch:
     runs-on: ubuntu-latest
