@@ -31,25 +31,48 @@ jobs:
 
       # 1) Jornada actual Bundesliga
       - name: OpenLigaDB current matchday
-        run: curl -fsSL "https://www.openligadb.de/api/getcurrentgroup/bl1" -o data/bl1/current.json
+        run: curl --max-time 20 --retry 3 -fsSL "https://www.openligadb.de/api/getcurrentgroup/bl1" -o data/bl1/current.json
 
-      # 2) Partidos de la jornada actual
-      - name: OpenLigaDB matches for current MD
+      # 2) Partidos: detecta temporada y baja MD actual y vecinas
+      - name: OpenLigaDB matches for current and neighbors
         run: |
-          SEASON=2025
+          set -e
           MD=$(jq -r '.GroupOrderID' data/bl1/current.json)
-          curl -fsSL "https://www.openligadb.de/api/getmatchdata/bl1/${SEASON}/${MD}" -o "data/bl1/md-${MD}.json"
 
-      # 3) Equipos de la temporada
+          # Detecta temporada con datos (2025 primero, luego 2024)
+          for Y in 2025 2024; do
+            echo "Probando temporada $Y, jornada $MD"
+            curl --max-time 20 --retry 3 -fsSL "https://www.openligadb.de/api/getmatchdata/bl1/${Y}/${MD}" -o "data/bl1/md-${MD}.json" || echo "fallo"
+            BYTES=$(wc -c < "data/bl1/md-${MD}.json" || echo 0)
+            if [ "$BYTES" -gt 2 ]; then SEASON=$Y; break; fi
+          done
+
+          if [ -z "$SEASON" ]; then
+            echo "No hay datos para MD=$MD en 2025/2024"; exit 0
+          fi
+
+          echo "Temporada detectada: $SEASON"
+          for D in $(seq $((MD-1)) $((MD+1))); do
+            [ "$D" -gt 0 ] || continue
+            curl --max-time 20 --retry 3 -fsSL "https://www.openligadb.de/api/getmatchdata/bl1/${SEASON}/${D}" \
+              -o "data/bl1/md-${D}.json" || true
+          done
+
+          ls -l data/bl1/
+
+      # 3) Equipos de la temporada (2025 o 2024)
       - name: OpenLigaDB teams
         run: |
-          SEASON=2025
-          curl -fsSL "https://www.openligadb.de/api/getavailableteams/bl1/${SEASON}" -o data/bl1/teams.json
+          for Y in 2025 2024; do
+            curl --max-time 20 --retry 3 -fsSL "https://www.openligadb.de/api/getavailableteams/bl1/${Y}" -o data/bl1/teams.json || true
+            BYTES=$(wc -c < data/bl1/teams.json || echo 0)
+            if [ "$BYTES" -gt 2 ]; then echo "Teams de $Y"; break; fi
+          done
 
       # 4) Escudos y estadios desde TheSportsDB (API free key 123)
       - name: Media (teams + stadium thumbs)
         run: |
-          curl -fsSL "https://www.thesportsdb.com/api/v1/json/123/search_all_teams.php?l=German%20Bundesliga" \
+          curl --max-time 20 --retry 3 -fsSL "https://www.thesportsdb.com/api/v1/json/123/search_all_teams.php?l=German%20Bundesliga" \
           | jq '{teams: [.teams[] | {id:.idTeam, name:.strTeam, badge:.strTeamBadge, stadium:.strStadium, stadiumThumb:.strStadiumThumb}]}' \
           > data/media/teams.json
 
