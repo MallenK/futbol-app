@@ -1,0 +1,48 @@
+name: fetch-open-data
+on:
+  schedule: [{ cron: "*/30 * * * *" }]   # cada 30 min (UTC)
+  workflow_dispatch:                      # ejecutable a mano
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar jq y curl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: Crear carpetas
+        run: mkdir -p data/bl1 data/media
+
+      # 1) Jornada actual Bundesliga
+      - name: OpenLigaDB current matchday
+        run: curl -fsSL "https://www.openligadb.de/api/getcurrentgroup/bl1" -o data/bl1/current.json
+
+      # 2) Partidos de la jornada actual
+      - name: OpenLigaDB matches for current MD
+        run: |
+          SEASON=2025
+          MD=$(jq -r '.GroupOrderID' data/bl1/current.json)
+          curl -fsSL "https://www.openligadb.de/api/getmatchdata/bl1/${SEASON}/${MD}" -o "data/bl1/md-${MD}.json"
+
+      # 3) Equipos de la temporada
+      - name: OpenLigaDB teams
+        run: |
+          SEASON=2025
+          curl -fsSL "https://www.openligadb.de/api/getavailableteams/bl1/${SEASON}" -o data/bl1/teams.json
+
+      # 4) Escudos y estadios desde TheSportsDB (API free key 123)
+      - name: Media (teams + stadium thumbs)
+        run: |
+          curl -fsSL "https://www.thesportsdb.com/api/v1/json/123/search_all_teams.php?l=German%20Bundesliga" \
+          | jq '{teams: [.teams[] | {id:.idTeam, name:.strTeam, badge:.strTeamBadge, stadium:.strStadium, stadiumThumb:.strStadiumThumb}]}' \
+          > data/media/teams.json
+
+      - name: Commit y push si hay cambios
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/
+          git diff --quiet || git commit -m "Update data" && git push
